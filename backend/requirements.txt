@@ -1,0 +1,15 @@
+fastapi==0.99.0
+uvicorn[standard]==0.22.0
+python-dotenv==1.0.0
+sqlalchemy==2.0.22
+alembic==1.12.0
+# Use Pydantic 1.x to satisfy FastAPI 0.99 dependency
+pydantic==1.10.12
+aiofiles==23.1.0
+
+# Test dependencies
+pytest==7.4.2
+httpx==0.24.1
+Pillow==10.0.1
+mss==9.0.1
+passlib[bcrypt]==1.7.4

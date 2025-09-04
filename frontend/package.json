@@ -1,0 +1,30 @@
+{
+  "name": "replika-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./electron/main.js",
+  "scripts": {
+  "start": "electron .",
+  "dev": "concurrently \"vite\" \"electron .\"",
+  "dev:e2e": "concurrently \"(cd ../backend && python -m uvicorn app.main:app --reload)\" \"vite\"",
+  "e2e:install": "npx playwright install --with-deps",
+  "e2e:test": "npx playwright test --reporter=dot --workers=1",
+  "e2e:test:ci": "npx playwright test --reporter=junit,html --output=test-results --workers=1",
+  "build": "vite build && electron-builder",
+  "vite": "vite"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "electron": "^26.0.0",
+    "recharts": "^2.5.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "concurrently": "^8.0.1",
+    "electron-builder": "^24.6.0",
+    "@playwright/test": "1.55.0",
+    "playwright": "1.55.0"
+  }
+}

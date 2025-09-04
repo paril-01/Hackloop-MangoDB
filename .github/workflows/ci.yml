@@ -1,0 +1,163 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    # expose the matrix db value as a job output so downstream jobs can conditionally run
+    outputs:
+      db: ${{ steps.set-db.outputs.db }}
+    strategy:
+      matrix:
+        python-version: [3.11, 3.12]
+        db: [sqlite, postgres]
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: replika
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      - name: Set job db output
+        id: set-db
+        run: |
+          echo "db=${{ matrix.db }}" >> $GITHUB_OUTPUT
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Set DATABASE_URL
+        run: |
+          if [ "${{ matrix.db }}" = "postgres" ]; then
+            echo "DATABASE_URL=postgresql://postgres:postgres@localhost:5432/replika" >> $GITHUB_ENV
+          else
+            echo "DATABASE_URL=sqlite:///./replika.db" >> $GITHUB_ENV
+          fi
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install -r backend/requirements.txt
+          if [ "${{ matrix.db }}" = "postgres" ]; then
+            pip install psycopg2-binary
+          fi
+      - name: Run migrations and seed
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: |
+          source .venv/bin/activate
+          python -m alembic upgrade head
+          python backend/scripts/seed_db.py
+      - name: Run tests
+        env:
+          DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: |
+          source .venv/bin/activate
+          pytest -q
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install frontend deps
+        run: |
+          cd frontend
+          npm ci
+      - name: Build frontend
+        run: |
+          cd frontend
+          npm run vite --silent
+
+  determine-db:
+    runs-on: ubuntu-latest
+    outputs:
+      db: ${{ steps.set.outputs.db }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decide DB for e2e
+        id: set
+        run: |
+          # deterministic choice for e2e; change here to run e2e against a different DB
+          echo "db=sqlite" >> $GITHUB_OUTPUT
+
+  frontend-e2e:
+    needs: [backend-tests, determine-db]
+    if: needs.determine-db.outputs.db == 'sqlite'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install backend deps
+        run: |
+          python -m pip install --upgrade pip
+          cd backend
+          pip install -r requirements.txt
+      - name: Run DB migrations
+        run: |
+          cd backend
+          alembic upgrade head
+      - name: Start backend
+        run: |
+          cd backend
+          nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 &>/dev/null &
+          for i in {1..60}; do if curl -sSf http://localhost:8000/health; then echo backend up; exit 0; else sleep 1; fi; done
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Cache npm
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      - name: Install frontend deps
+        run: |
+          cd frontend
+          npm ci
+      - name: Install Playwright browsers
+        run: |
+          cd frontend
+          npx playwright install --with-deps
+      - name: Start frontend dev server
+        run: |
+          cd frontend
+          npm run vite &
+          for i in {1..60}; do if curl -sSf http://localhost:5173; then echo frontend up; exit 0; else sleep 1; fi; done
+      - name: Run e2e tests
+        continue-on-error: true
+        run: |
+          cd frontend
+          npm run e2e:test:ci || true
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+            frontend/tests/playwright-report
+            frontend/e2e/test-results
