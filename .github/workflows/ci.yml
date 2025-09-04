@@ -60,13 +60,15 @@ jobs:
           DATABASE_URL: ${{ env.DATABASE_URL }}
         run: |
           source .venv/bin/activate
+          cd backend
           python -m alembic upgrade head
-          python backend/scripts/seed_db.py
+          python scripts/seed_db.py
       - name: Run tests
         env:
           DATABASE_URL: ${{ env.DATABASE_URL }}
         run: |
           source .venv/bin/activate
+          cd backend
           pytest -q
 
   frontend-build:
@@ -130,7 +132,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('frontend/package-lock.json') }}
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json', '**/package.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
       - name: Install frontend deps
